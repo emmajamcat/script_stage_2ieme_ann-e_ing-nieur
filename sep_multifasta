@@ -1,0 +1,34 @@
+from pathlib import Path
+
+def split_fasta(input_file, nb_per_file=30):
+    input_path = Path(input_file)
+    base_name = input_path.stem
+    ext = input_path.suffix
+
+    with open(input_file, 'r') as infile:
+        sequences = []
+        current_seq = []
+        for line in infile:
+            if line.startswith('>'):
+                if current_seq:
+                    sequences.append(''.join(current_seq))
+                    current_seq = []
+            current_seq.append(line)
+        if current_seq:
+            sequences.append(''.join(current_seq))
+
+    total_files = (len(sequences) + nb_per_file - 1) // nb_per_file
+
+    for i in range(total_files):
+        start = i * nb_per_file
+        end = start + nb_per_file
+        batch = sequences[start:end]
+        output_file = f"{base_name}_part{i+1}{ext}"
+        with open(output_file, 'w') as outfile:
+            outfile.writelines(batch)
+        print(f"Écrit {len(batch)} séquences dans {output_file}")
+
+if __name__ == "__main__":
+    # Remplace le nom du fichier ici si besoin
+    split_fasta("svevo2_proteins_7A_Soldur_noSTOP.fasta", nb_per_file=30)
+
