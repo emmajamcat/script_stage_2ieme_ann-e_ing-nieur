@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import csv
+import unicodedata
+import re
+import math
+import sys
+from collections import OrderedDict
+
+# --- CONFIG ---
+fichiers = ["best_iptm_seed1.csv", "best_iptm_seed2.csv", "best_iptm_seed3.csv"]
+fichier_sortie = "best_scores.csv"
+# ----------------
+
+def norm_text(s):
+    """Normalize unicode, strip and collapse whitespace."""
+    if s is None:
+        return ""
+    s = unicodedata.normalize("NFKC", s)
+    s = s.strip()
+    s = re.sub(r'\s+', ' ', s)
+    return s
+
+def canon_key(duo, proteine):
+    """Canonicalize duo/proteine for keying (case-insensitive)."""
+    return (norm_text(duo).lower(), norm_text(proteine).lower())
+
+def parse_float_eu(s):
+    """Parse float where decimal may be comma or dot. Return None if not parseable."""
+    if s is None:
+        return None
+    s2 = norm_text(s)
+    if s2 == "":
+        return None
+    s2 = s2.replace(',', '.')
+    try:
+        return float(s2)
+    except ValueError:
+        return None
+
+def find_column(fieldnames, candidates):
+    """
+    Find best matching column name in fieldnames given a list of candidate substrings.
+    fieldnames: list of actual header strings.
+    candidates: ordered list of substrings to try (lowercase).
+    Returns actual header string or None.
+    """
+    low_map = {fn: norm_text(fn).lower() for fn in fieldnames}
+    # exact match first
+    for cand in candidates:
+        for fn, ln in low_map.items():
+            if ln == cand:
+                return fn
+    # substring match
+    for cand in candidates:
+        for fn, ln in low_map.items():
+            if cand in ln:
+                return fn
+    return None
+
+# container for best rows
+best = {}  # key (canon duo, canon proteine) -> dict with chosen info
+
+EPS = 1e-9
+for f in fichiers:
+    try:
+        csvfile = open(f, newline='', encoding='utf-8-sig')
+    except FileNotFoundError:
+        print(f"Fichier non trouvé: {f}", file=sys.stderr)
+        sys.exit(1)
+
+    reader = csv.DictReader(csvfile, delimiter=';')
+    if reader.fieldnames is None:
+        print(f"Le fichier {f} semble vide ou sans en-tête.", file=sys.stderr)
+        csvfile.close()
+        continue
+
+    # normalize header names list
+    headers = [norm_text(h) for h in reader.fieldnames]
+
+    # detect columns
+    duo_col = find_column(reader.fieldnames, ['duo'])
+    prote_col = find_column(reader.fieldnames, ['proteine', 'protein', 'prot'])
+    score_col = find_column(reader.fieldnames, ['score_a', 'scorea', 'score'])
+    iptm_col = find_column(reader.fieldnames, ['iptm'])
+    ptm_col = find_column(reader.fieldnames, ['ptm'])
+    rank_col = find_column(reader.fieldnames, ['ranking', 'rank', 'ranking', 'rAnking', 'rAnkinGscore'.lower()])
+
+    # require at least duo/proteine/score
+    if not duo_col or not prote_col or not score_col:
+        print("="*60, file=sys.stderr)
+        print(f"Colonnes trouvées dans {f} : {reader.fieldnames}", file=sys.stderr)
+        print(f"Impossible de trouver 'duo', 'proteine' ou 'score_a' dans {f}.", file=sys.stderr)
+        print("Vérifie les en-têtes ; noms détectés :", file=sys.stderr)
+        print(f" duo_col={duo_col}, prote_col={prote_col}, score_col={score_col}", file=sys.stderr)
+        print("="*60, file=sys.stderr)
+        csvfile.close()
+        sys.exit(1)
+
+    for raw in reader:
+        # read raw strings safely (some headers could have weird spacing/case)
+        duo_raw = raw.get(duo_col, "")
+        prote_raw = raw.get(prote_col, "")
+        score_raw = raw.get(score_col, "")
+        iptm_raw = raw.get(iptm_col, "") if iptm_col else ""
+        ptm_raw = raw.get(ptm_col, "") if ptm_col else ""
+        rank_raw = raw.get(rank_col, "") if rank_col else ""
+
+        key = canon_key(duo_raw, prote_raw)
+
+        score_val = parse_float_eu(score_raw)
+        score_val_cmp = score_val if score_val is not None else -math.inf
+
+        iptm_val = parse_float_eu(iptm_raw)
+        iptm_cmp = iptm_val if iptm_val is not None else -math.inf
+
+        ptm_val = parse_float_eu(ptm_raw)
+        ptm_cmp = ptm_val if ptm_val is not None else -math.inf
+
+        rank_val = parse_float_eu(rank_raw)
+        rank_cmp = rank_val if rank_val is not None else -math.inf
+
+        # prepare stored row (we keep original-looking strings but stripped & normalized for readability)
+        stored_row = {
+            'duo': norm_text(duo_raw),
+            'proteine': norm_text(prote_raw),
+            'iptm_raw': norm_text(iptm_raw),
+            'ptm_raw': norm_text(ptm_raw),
+            'rank_raw': norm_text(rank_raw),
+            'score_raw': norm_text(score_raw),
+            'score_val': score_val_cmp,
+            'iptm_val': iptm_cmp,
+            'ptm_val': ptm_cmp,
+            'rank_val': rank_cmp,
+            'source_file': f
+        }
+
+        if key not in best:
+            best[key] = stored_row
+        else:
+            cur = best[key]
+            # Compare by score_a first
+            if stored_row['score_val'] > cur['score_val'] + EPS:
+                best[key] = stored_row
+            elif abs(stored_row['score_val'] - cur['score_val']) <= EPS:
+                # tie-breaker: iptm, then ptm, then ranking score
+                if stored_row['iptm_val'] > cur.get('iptm_val', -math.inf) + EPS:
+                    best[key] = stored_row
+                elif abs(stored_row['iptm_val'] - cur.get('iptm_val', -math.inf)) <= EPS:
+                    if stored_row['ptm_val'] > cur.get('ptm_val', -math.inf) + EPS:
+                        best[key] = stored_row
+                    elif abs(stored_row['ptm_val'] - cur.get('ptm_val', -math.inf)) <= EPS:
+                        if stored_row['rank_val'] > cur.get('rank_val', -math.inf) + EPS:
+                            best[key] = stored_row
+                        # sinon garder l'existant (stable)
+                # sinon garder l'existant
+            # sinon garder l'existant
+
+    csvfile.close()
+
+# écriture du fichier de sortie avec en-têtes demandées
+with open(fichier_sortie, 'w', newline='', encoding='utf-8') as out:
+    fieldnames = ['duo', 'proteine', 'iptm', 'ptm', 'rAnkinGscore', 'score_a']
+    writer = csv.DictWriter(out, fieldnames=fieldnames, delimiter=';')
+    writer.writeheader()
+    # tri optionnel par duo/proteine pour lisibilité
+    for key in sorted(best.keys()):
+        row = best[key]
+        # format numbers: si parseable, écrire avec virgule décimale ; sinon écrire la chaîne brute
+        def fmt_num(raw_str, parsed_val):
+            if parsed_val == -math.inf:
+                # non-numeric or absent -> écrire la valeur brute (s'il y en a) sinon vide
+                return raw_str if raw_str != "" else ""
+            # format float with comma decimal, remove trailing zeros (optionnel)
+            s = ("{:.6f}".format(parsed_val)).rstrip('0').rstrip('.')
+            return s.replace('.', ',')
+        out_row = {
+            'duo': row['duo'],
+            'proteine': row['proteine'],
+            'iptm': fmt_num(row['iptm_raw'], row['iptm_val']),
+            'ptm': fmt_num(row['ptm_raw'], row['ptm_val']),
+            'rAnkinGscore': fmt_num(row['rank_raw'], row['rank_val']),
+            'score_a': fmt_num(row['score_raw'], row['score_val'])
+        }
+        writer.writerow(out_row)
+
+print(f"Fait — fichier de sortie : {fichier_sortie} (une seule ligne par paire duo/proteine).")
