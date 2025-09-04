@@ -1,0 +1,59 @@
+import os
+import sys
+import zipfile
+import json
+import csv
+
+if len(sys.argv) < 2:
+    print(f"Usage: python3 {sys.argv[0]} <zipfile>")
+    sys.exit(1)
+
+zip_path = sys.argv[1]
+duo_results = {}
+
+with zipfile.ZipFile(zip_path, 'r') as z:
+    # Liste tous les dossiers de protéines
+    protein_dirs = set([
+        os.path.dirname(f)
+        for f in z.namelist()
+        if '/' in f and f.endswith('.json')
+    ])
+    
+    for protein_dir in protein_dirs:
+        # Liste tous les fichiers de confiance dans ce dossier
+        json_files = [f for f in z.namelist()
+                      if f.startswith(protein_dir) and any(
+                          f.endswith(f"_summary_confidences_{i}.json") for i in range(6)
+                      )]
+        best_entry = None
+        for json_file in json_files:
+            with z.open(json_file) as jf:
+                data = json.load(jf)
+                entry = {
+                    "duo_name": protein_dir,
+                    "iptm": data.get("iptm"),
+                    "ptm": data.get("ptm"),
+                    "ranking_score": data.get("ranking_score")
+                }
+                if best_entry is None or entry["ranking_score"] > best_entry["ranking_score"]:
+                    best_entry = entry
+        if best_entry:
+            duo_results[protein_dir] = best_entry
+
+# Gestion de l'entête pour append
+csvfile = "best_scores_by_duo.csv"
+write_header = not os.path.exists(csvfile) or os.stat(csvfile).st_size == 0
+
+with open(csvfile, "a", newline="") as f:
+    writer = csv.writer(f)
+    if write_header:
+        writer.writerow(["duo", "iptm", "ptm", "ranking_score"])
+    for duo, entry in sorted(duo_results.items()):
+        writer.writerow([
+            duo,
+            entry["iptm"],
+            entry["ptm"],
+            entry["ranking_score"]
+        ])
+
+print("Fichier best_scores_by_duo.csv créé !")
