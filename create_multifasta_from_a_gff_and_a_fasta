@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import subprocess
+from collections import defaultdict
+
+# === PARAMÈTRES ===
+GFF_FILE =
+"corrected_annotation_extracted_Chr7A_SVEVO_NEW_730000001_753887139.gff"
+FASTA_FILE = "chr7A_SVEVO_NEW_730000001-753887139.fasta"
+OUT_FASTA = "coding_sequences.fasta"
+
+CODON_TABLE = {
+    "TTT": "F", "TTC": "F", "TTA": "L", "TTG": "L", "CTT": "L", "CTC": "L", "CTA": "L", "CTG": "L",
+    "ATT": "I", "ATC": "I", "ATA": "I", "ATG": "M",
+    "GTT": "V", "GTC": "V", "GTA": "V", "GTG": "V",
+    "TCT": "S", "TCC": "S", "TCA": "S", "TCG": "S", "AGT": "S", "AGC": "S",
+    "CCT": "P", "CCC": "P", "CCA": "P", "CCG": "P",
+    "ACT": "T", "ACC": "T", "ACA": "T", "ACG": "T",
+    "GCT": "A", "GCC": "A", "GCA": "A", "GCG": "A",
+    "TAT": "Y", "TAC": "Y", "CAT": "H", "CAC": "H",
+    "CAA": "Q", "CAG": "Q", "AAT": "N", "AAC": "N",
+    "AAA": "K", "AAG": "K", "GAT": "D", "GAC": "D",
+    "GAA": "E", "GAG": "E", "TGT": "C", "TGC": "C",
+    "TGG": "W", "CGT": "R", "CGC": "R", "CGA": "R", "CGG": "R", "AGA": "R", "AGG": "R",
+    "GGT": "G", "GGC": "G", "GGA": "G", "GGG": "G",
+    "TAA": "*", "TAG": "*", "TGA": "*"
+}
+
+def reverse_complement(seq):
+    base_comp = str.maketrans("ACGTacgt", "TGCAtgca")
+    return seq.translate(base_comp)[::-1]
+
+def translate_dna(seq):
+    seq = seq.upper().replace('\n','').replace(' ','')
+    prot = []
+    for i in range(0, len(seq) - 2, 3):
+        codon = seq[i:i+3]
+        aa = CODON_TABLE.get(codon, "X")
+        if aa == "*":
+            break
+        prot.append(aa)
+    return "".join(prot)
+
+def parse_gff_cds(gff_path):
+    cds_dict = defaultdict(list)
+    with open(gff_path, "r") as fin:
+        for line in fin:
+            if line.startswith("#") or not line.strip():
+                continue
+            parts = line.strip().split("\t")
+            if len(parts) < 9:
+                continue
+            feature = parts[2]
+            if feature != "CDS":
+                continue
+            seqid, source, feature, start, end, score, strand, phase, attributes = parts
+            start, end = int(start), int(end)
+            phase = int(phase) if phase.isdigit() else 0
+            parent = None
+            for attr in attributes.split(";"):
+                if attr.startswith("Parent="):
+                    parent = attr.split("=", 1)[1]
+            if not parent:
+                continue
+            cds_dict[parent].append((start, end, phase, strand))
+    return cds_dict
+
+def read_fasta_sequence(fasta_path):
+    seq = []
+    with open(fasta_path) as f:
+        for line in f:
+            if line.startswith(">"):
+                continue
+            seq.append(line.strip())
+    return "".join(seq).upper()
+
+def extract_and_translate_cds(cds_dict, genome_seq):
+    prot_dict = {}
+    for parent, cds_list in cds_dict.items():
+        strand = cds_list[0][3]
+        reverse = strand == "-"
+        cds_list_sorted = sorted(cds_list, key=lambda x: x[0], reverse=reverse)
+        cds_seq = ""
+        for start, end, phase, _ in cds_list_sorted:
+            frag = genome_seq[start-1:end]
+            frag = frag[phase:]
+            cds_seq += frag
+        if strand == "-":
+            cds_seq = reverse_complement(cds_seq)
+        prot = translate_dna(cds_seq)
+        prot_dict[parent] = prot
+    return prot_dict
+
+def write_protein_fasta(prot_dict, out_path):
+    with open(out_path, "w") as fout:
+        for parent, prot_seq in prot_dict.items():
+            fout.write(f">{parent}\n")
+            for i in range(0, len(prot_seq), 60):
+                fout.write(prot_seq[i:i+60] + "\n")
+    print(f"FASTA protéique écrit dans {out_path}")
+
+def under_slurm():
+    # Détection SLURM
+    return "SLURM_JOB_ID" in os.environ
+
+def submit_self_as_slurm():
+    # Génère un script SLURM temporaire pour lancer ce script Python
+    script = f"""#!/bin/bash
+#SBATCH -J extract_CDS
+#SBATCH --partition=long
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=8G
+#SBATCH -A protein_interaction_btw_wssmv_wheat
+#SBATCH -o extract_cds_%j.out
+#SBATCH -e extract_cds_%j.err
+
+cd {os.getcwd()}
+python3 {os.path.abspath(__file__)}
+"""
+    slurmfile = "run_extract_cds.slurm"
+    with open(slurmfile, "w") as f:
+        f.write(script)
+    print(f"Soumission du script SLURM : {slurmfile} ...")
+    subprocess.check_call(["sbatch", slurmfile])
+    print("Soumis !")
+    sys.exit(0)
+
+def main():
+    # Auto-soumission SLURM si besoin
+    if not under_slurm():
+        submit_self_as_slurm()
+
+    gff = os.path.join(os.path.dirname(__file__), GFF_FILE)
+    fasta = os.path.join(os.path.dirname(__file__), FASTA_FILE)
+    out_fasta = os.path.join(os.path.dirname(__file__), OUT_FASTA)
+
+    cds_dict = parse_gff_cds(gff)
+    genome_seq = read_fasta_sequence(fasta)
+    prot_dict = extract_and_translate_cds(cds_dict, genome_seq)
+    write_protein_fasta(prot_dict, out_fasta)
+
+if __name__ == "__main__":
+    main()
+
+Puis nous avons utilisé ce script qui permet de séparer le fichier fasta en 11 fichiers de 30 gènes:
+from pathlib import Path
+
+def split_fasta(input_file, nb_per_file=30):
+    input_path = Path(input_file)
+    base_name = input_path.stem
+    ext = input_path.suffix
+
+    with open(input_file, 'r') as infile:
+        sequences = []
+        current_seq = []
+        for line in infile:
+            if line.startswith('>'):
+                if current_seq:
+                    sequences.append(''.join(current_seq))
+                    current_seq = []
+            current_seq.append(line)
+        if current_seq:
+            sequences.append(''.join(current_seq))
+
+    total_files = (len(sequences) + nb_per_file - 1) // nb_per_file
+
+    for i in range(total_files):
+        start = i * nb_per_file
+        end = start + nb_per_file
+        batch = sequences[start:end]
+        output_file = f"{base_name}_part{i+1}{ext}"
+        with open(output_file, 'w') as outfile:
+            outfile.writelines(batch)
+        print(f"Écrit {len(batch)} séquences dans {output_file}")
+
+if __name__ == "__main__":
+    # Remplace le nom du fichier ici si besoin
+    split_fasta("svevo2_proteins_7A_Soldur_noSTOP.fasta", nb_per_file=30)
+
+
+puis pour les transformer en fichier json:
+import argparse
+import json
+import os
+
+def read_multifasta(path):
+    """Lit un multi-fasta, retourne une liste de tuples (nom, séquence)."""
+    seqs = []
+    name = None
+    seq = ""
+    with open(path, "r") as f:
+        for line in f:
+            if line.startswith(">"):
+                if name:
+                    seqs.append((name, seq))
+                name = line[1:].strip()
+                seq = ""
+            else:
+                seq += line.strip()
+        if name:
+            seqs.append((name, seq))
+    return seqs
+
+def read_fasta_or_seq(val):
+    """Lit un fichier FASTA ou retourne la séquence brute passée en argument."""
+    if os.path.isfile(val):
+        seqs = read_multifasta(val)
+        if len(seqs) == 1:
+            return seqs[0][1]
+        else:
+            raise ValueError(f"Le fichier {val} contient plus d'une séquence.")
+    else:
+        return val.strip()
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--wheat_fasta", required=True, help="Multi-fasta des protéines de blé")
+    parser.add_argument("--viral_seq", required=True, help="Séquence de la protéine virale (ou fichier FASTA)")
+    parser.add_argument("--out", default="all_jobs.json", help="Nom du JSON de sortie")
+    args = parser.parse_args()
+
+    wheat_prots = read_multifasta(args.wheat_fasta)
+    viral_seq = read_fasta_or_seq(args.viral_seq)
+
+    jobs = []
+    for name, wheat_seq in wheat_prots:
+        job = {
+            "name": f"{name}_vs_VPG",
+            "modelSeeds": [],
+            "sequences": [
+                {
+                    "proteinChain": {
+                        "sequence": wheat_seq,
+                        "count": 1
+                    }
+                },
+                {
+                    "proteinChain": {
+                        "sequence": viral_seq,
+                        "count": 1
+                    }
+                }
+            ],
+            "dialect": "alphafoldserver",
+            "version": 1
+        }
+        jobs.append(job)
+
+    with open(args.out, "w") as fout:
+        json.dump(jobs, fout, indent=2)
+
+if __name__ == "__main__":
+    main()
+
