@@ -1,0 +1,72 @@
+import argparse
+import json
+import os
+
+def read_multifasta(path):
+    """Lit un multi-fasta, retourne une liste de tuples (nom, séquence)."""
+    seqs = []
+    name = None
+    seq = ""
+    with open(path, "r") as f:
+        for line in f:
+            if line.startswith(">"):
+                if name:
+                    seqs.append((name, seq))
+                name = line[1:].strip()
+                seq = ""
+            else:
+                seq += line.strip()
+        if name:
+            seqs.append((name, seq))
+    return seqs
+
+def read_fasta_or_seq(val):
+    """Lit un fichier FASTA ou retourne la séquence brute passée en argument."""
+    if os.path.isfile(val):
+        seqs = read_multifasta(val)
+        if len(seqs) == 1:
+            return seqs[0][1]
+        else:
+            raise ValueError(f"Le fichier {val} contient plus d'une séquence.")
+    else:
+        return val.strip()
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--wheat_fasta", required=True, help="Multi-fasta des protéines de blé")
+    parser.add_argument("--viral_seq", required=True, help="Séquence de la protéine virale (ou fichier FASTA)")
+    parser.add_argument("--out", default="all_jobs.json", help="Nom du JSON de sortie")
+    args = parser.parse_args()
+
+    wheat_prots = read_multifasta(args.wheat_fasta)
+    viral_seq = read_fasta_or_seq(args.viral_seq)
+
+    jobs = []
+    for name, wheat_seq in wheat_prots:
+        job = {
+            "name": f"{name}_vs_Nla_pro",
+            "modelSeeds": [],
+            "sequences": [
+                {
+                    "proteinChain": {
+                        "sequence": wheat_seq,
+                        "count": 1
+                    }
+                },
+                {
+                    "proteinChain": {
+                        "sequence": viral_seq,
+                        "count": 1
+                    }
+                }
+            ],
+            "dialect": "alphafoldserver",
+            "version": 1
+        }
+        jobs.append(job)
+
+    with open(args.out, "w") as fout:
+        json.dump(jobs, fout, indent=2)
+
+if __name__ == "__main__":
+    main()
