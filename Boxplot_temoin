@@ -1,0 +1,80 @@
+library(ggplot2)
+library(dplyr)
+
+# Lecture des données
+donnees <- read.csv(
+  "C:\\Users\\jameux-catelan\\Documents\\resultats_finaux\\temoin.csv",
+  header = TRUE,
+  sep = ";"
+)
+
+# Conversion en numérique
+donnees$score_interaction <- as.numeric(gsub(",", ".", donnees$ranking.score))
+
+# Identification des outliers
+outliers <- donnees %>%
+  group_by(proteine) %>%
+  mutate(
+    Q1 = quantile(score_interaction, 0.25, na.rm = TRUE),
+    Q3 = quantile(score_interaction, 0.75, na.rm = TRUE),
+    IQR = Q3 - Q1,
+    lower = Q1 - 1.5 * IQR,
+    upper = Q3 + 1.5 * IQR,
+    is_outlier = score_interaction < lower | score_interaction > upper
+  ) %>%
+  filter(is_outlier)
+
+# Plot
+ggplot(donnees, aes(x = proteine, y = score_interaction)) +
+  geom_boxplot(fill = "skyblue", alpha = 0.3, outlier.shape = NA) +  # boxplot transparent
+  geom_jitter(width = 0.2, alpha = 0.6) +  # nuage de points
+  geom_text(
+    data = outliers,
+    aes(label = ID),
+    size = 2.8,  # taille réduite
+    vjust = -0.5,
+    color = "red"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#plot sans noms gènes
+# Identification des outliers
+outliers <- donnees %>%
+  group_by(proteine) %>%
+  mutate(
+    Q1 = quantile(score_interaction, 0.25, na.rm = TRUE),
+    Q3 = quantile(score_interaction, 0.75, na.rm = TRUE),
+    IQR = Q3 - Q1,
+    lower = Q1 - 1.5 * IQR,
+    upper = Q3 + 1.5 * IQR,
+    is_outlier = score_interaction < lower | score_interaction > upper
+  ) %>%
+  filter(is_outlier)
+
+# Plot sans nom de gènes
+ggplot(donnees, aes(x = proteine, y = score_interaction)) +
+  geom_boxplot(fill = "skyblue", alpha = 0.2, outlier.shape = NA) +  # boxplot transparent
+  geom_jitter(width = 0.2, alpha = 0.6) +  # nuage de points
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# Plot avec zoom 0-1 sur l'axe y, sans noms de gènes
+ggplot(donnees, aes(x = proteine, y = score_interaction)) +
+  geom_boxplot(fill = "skyblue", alpha = 0.2, outlier.shape = NA) +  # boxplot transparent
+  geom_jitter(width = 0.2, alpha = 0.6) +  # nuage de points
+  coord_cartesian(ylim = c(0, 1)) +  # zoom sur l'axe y
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggplot(donnees, aes(x = proteine, y = score_interaction)) +
+  geom_boxplot(
+    fill = "skyblue", 
+    alpha = 0.2, 
+    outlier.shape = NA, 
+    size = 0.5,   # épaisseur des lignes des boîtes et moustaches
+    width = 0.4   # largeur des boîtes
+  ) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  coord_cartesian(ylim = c(0, 1)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
