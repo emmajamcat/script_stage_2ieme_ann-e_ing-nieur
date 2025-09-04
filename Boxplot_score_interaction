@@ -1,0 +1,55 @@
+# Charger les packages
+library(dplyr)
+library(ggplot2)
+
+# 1️⃣ Lire le fichier initial
+df <- read.csv("C:\\Users\\jameux-catelan\\Documents\\resultats_finaux\\all_of_3_seed.csv",
+               sep = ";", dec = ",", stringsAsFactors = FALSE)
+
+# 2️⃣ Nettoyer et convertir score_a en numérique
+df$score_a <- as.numeric(gsub(",", ".", df$score_a))
+
+# Vérifier qu'il n'y a pas de NA
+if(sum(is.na(df$score_a)) > 0){
+  stop("Attention : certaines valeurs de score_a sont NA après conversion !")
+}
+
+# 3️⃣ Calcul de l'écart-type par ID (uniquement si plus d'une valeur)
+df_ecart <- df %>%
+  group_by(ID) %>%
+  summarise(ecart_type_seed = ifelse(n() > 1, sd(score_a, na.rm = TRUE), NA_real_))
+
+# 4️⃣ Sauvegarder le fichier CSV propre
+write.table(df_ecart,
+            "C:\\Users\\jameux-catelan\\Documents\\resultats_finaux\\ecart_type_seed.csv",
+            sep = ";",
+            dec = ".",
+            row.names = FALSE,
+            quote = TRUE)
+
+# 5️⃣ Relire le fichier pour vérification et plot
+donnees <- read.csv("C:\\Users\\jameux-catelan\\Documents\\resultats_finaux\\ecart_type_seed.csv",
+                    sep = ";", dec = ".", stringsAsFactors = FALSE)
+
+# S'assurer que c'est numérique
+donnees$ecart_type_seed <- as.numeric(donnees$ecart_type_seed)
+
+# 6️⃣ Histogramme de l'écart-type
+ggplot(donnees, aes(x = ecart_type_seed)) +
+  geom_histogram(binwidth = 0.05, fill = "skyblue", color = "black") +
+  labs(title = "Histogramme de l'écart-type par ID",
+       breaks=10,
+       x = "Écart-type de ",
+       y = "Nombre d'IDs") +
+  theme_minimal()
+
+
+
+ggplot(donnees, aes(x = ecart_type_seed)) +
+  geom_histogram(binwidth = 0.01, fill = "skyblue", color = "black") +  # plus de barres
+  labs(title = "Histogramme de l'écart-type par dimère protéique",
+       x = "Écart-type du score d'interaction de chaque dimère",
+       y = "Nombre d'individus") +
+  theme_minimal()
+
+
