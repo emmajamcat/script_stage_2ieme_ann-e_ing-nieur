@@ -1,0 +1,23 @@
+import json
+import os
+
+# === CONFIGURATION ===
+input_file = "all_job_serie2.json"  # Nom de ton fichier JSON d'entrée
+output_dir = "output_chunks_serie2"  # Dossier pour stocker les fichiers découpés
+chunk_size = 30  # Nombre de dimères par fichier
+
+# === CRÉER LE DOSSIER DE SORTIE SI NÉCESSAIRE ===
+os.makedirs(output_dir, exist_ok=True)
+
+# === LIRE LE FICHIER JSON ===
+with open(input_file, 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+# === DIVISER LES DONNÉES EN BLOCS DE 30 ===
+for i in range(0, len(data), chunk_size):
+    chunk = data[i:i+chunk_size]
+    output_path = os.path.join(output_dir, f"dimers_chunk_2_{i//chunk_size + 1}.json")
+    with open(output_path, 'w', encoding='utf-8') as f_out:
+        json.dump(chunk, f_out, indent=2)
+
+    print(f"Écrit {len(chunk)} entrées dans {output_path}")
