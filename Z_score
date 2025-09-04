@@ -1,0 +1,24 @@
+# Charger les données
+donnees <- read.csv("C:\\Users\\jameux-catelan\\Documents\\resultats_finaux\\toutes_les_proteines.csv",
+                    header = TRUE, sep = ";")
+
+# Conversion en numérique (remplacement des virgules par des points)
+donnees$score_interaction <- as.numeric(gsub(",", ".", donnees$score_interaction))
+
+# Calcul moyenne et écart-type
+mean_value <- mean(donnees$score_interaction, na.rm = TRUE)
+sd_value   <- sd(donnees$score_interaction, na.rm = TRUE)
+
+# Calcul des Z-scores
+donnees$z_score <- (donnees$score_interaction - mean_value) / sd_value
+
+# Détection des outliers (seuil = 3)
+donnees$outlier <- abs(donnees$z_score) > 3
+
+# Afficher les lignes outliers
+print(donnees[donnees$outlier, ])
+
+# Exporter le CSV avec colonne outlier
+write.csv(donnees,
+          "C:\\Users\\jameux-catelan\\Documents\\resultats_finaux\\all_proteine_with_outliers.csv",
+          row.names = FALSE)
