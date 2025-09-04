@@ -1,0 +1,86 @@
+import csv
+import os
+import json
+from make_alphafoldserver_json_multifasta import read_multifasta
+
+csv_file = "proteine_retourner_2e_serie.csv"
+wheat_fasta = "svevo2_proteins_7A_Soldur_noSTOP.fasta"
+
+viral_protein_files = {
+    "14K": "WSSMV_14K_protein.fasta",
+    "7K": "WSSMV_7K_protein.fasta",
+    "CI": "WSSMV_CI_protein.fasta",
+    "CP": "WSSMV_coat_protein.fasta",
+    "NLA-PRO": "WSSMV_NIa-Pro_protease.fasta",
+    "NLB": "WSSMV_NIb_protein.fasta",
+    "VPG": "WSSMV_NIa-VPg_protein.fasta",
+    "P1": "WSSMV_P1.fasta",
+    "P2": "WSSMV_P2.fasta",
+    "P3": "WSSMV_P3.fasta",
+    "PIPO": "WSSMV_PIPO.fasta",
+}
+
+wheat_sequences = read_multifasta(wheat_fasta)
+wheat_dict = {name: seq for name, seq in wheat_sequences}
+
+jobs = []
+
+missing_gene = 0
+missing_fasta = 0
+multiple_seqs = 0
+
+with open(csv_file, newline='') as f:
+    reader = csv.DictReader(f, delimiter=';')
+    for row in reader:
+        gene_id = row['duo']
+        viral_protein_key = row['proteine'].strip().upper()
+
+        # Chercher la séquence de blé
+        wheat_hit = None
+        for name in wheat_dict:
+            if gene_id in name:
+                wheat_hit = (name, wheat_dict[name])
+                break
+
+        if not wheat_hit:
+            print(f"Pas de séquence trouvée pour {gene_id}")
+            missing_gene += 1
+            continue
+
+        # Fichier viral
+        fasta_file = viral_protein_files.get(viral_protein_key)
+        if not fasta_file or not os.path.exists(fasta_file):
+            print(f"Fichier FASTA manquant pour {viral_protein_key}")
+            missing_fasta += 1
+            continue
+
+        viral_seqs = read_multifasta(fasta_file)
+        if len(viral_seqs) != 1:
+            print(f"{fasta_file} contient {len(viral_seqs)} séquences")
+            multiple_seqs += 1
+            continue
+
+        viral_seq = viral_seqs[0][1]
+
+        job = {
+            "name": f"{wheat_hit[0]}_vs_{viral_protein_key}",
+            "modelSeeds": [],
+            "sequences": [
+                {"proteinChain": {"sequence": wheat_hit[1], "count": 1}},
+                {"proteinChain": {"sequence": viral_seq, "count": 1}}
+            ],
+            "dialect": "alphafoldserver",
+            "version": 1
+        }
+        jobs.append(job)
+
+# Sauvegarde du fichier JSON
+with open("all_job_serie2.json", "w") as out:
+    json.dump(jobs, out, indent=2)
+
+print("\n✅ Résumé final :")
+print(f"- Total lignes CSV : {reader.line_num - 1}")
+print(f"- Jobs écrits      : {len(jobs)}")
+print(f"- Gènes manquants  : {missing_gene}")
+print(f"- Fichiers manquants : {missing_fasta}")
+print(f"- Fichiers avec plusieurs séquences : {multiple_seqs}")
